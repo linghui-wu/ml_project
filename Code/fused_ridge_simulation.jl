@@ -1,9 +1,11 @@
 using Base.Threads, CSV, DataFrames, JLD, Optim
 
-gamma = parse(Float64, ARGS[1])
+dgp = ARGS[1]
 event = parse(Int64, ARGS[2])
+gamma = parse(Float64, ARGS[3])
 
-data = sort(DataFrame(load("../Data/simulated_data/independent_"*string(event)*".csv")), [:n, :k])
+
+data = sort(DataFrame(load("../Data/simulated_data/"*dgp*"_nbhd_"*string(event)*".csv")), [:n, :k])
 num_k = length(unique(data.k))
 num_n = length(unique(data.n))
 k_df = DataFrame(id_k=collect(1:num_k), k=sort(unique(data.k)))
@@ -15,29 +17,24 @@ fe_n = unique(DataFrame(k=data.k, dest_fe=data.dest_fe)).dest_fe
 neighboring_tracts = CSV.read("../Data/simulated_data/tract_adjacency.csv", DataFrame)
 rename!(neighboring_tracts, :source=>:k)
 k_neighboring = innerjoin(k_df, neighboring_tracts, on=:k)
-# CSV.write("../Data/i_neighboring.csv", i_neighboring)
 
 neighboring_tracts = CSV.read("../Data/simulated_data/tract_adjacency.csv", DataFrame)
 rename!(neighboring_tracts, :source=>:n)
 n_neighboring = innerjoin(n_df, neighboring_tracts, on=:n)
-# CSV.write("../Data/j_neighboring.csv", j_neighboring)
 
 ϵ = -8.0
 params = vcat(ϵ, fe_k, fe_n)
 
-function ll(params; γ=gamma, data=data, D_k=k_neighboring, D_n=n_neighboring)
-    num_k = length(unique(data.k))
-    num_n = length(unique(data.n))
+function ll(params; γ=gamma, data=data, num_k=num_k, num_n=num_n, D_k=k_neighboring, D_n=n_neighboring)
     ϵ = params[1]
     α_k_vec = params[2:num_k + 1]
     α_n_vec = params[num_k+2:end]
-    k_df = DataFrame(id_k=collect(1:num_k), k=sort(unique(data.k)))
+    k_df = DataFrame(id_k=collect(1:num_k), k=unique(data.k))
     k_df.fe_k = α_k_vec 
-    n_df = DataFrame(id_n=collect(1:num_n), n=sort(unique(data.n)))
+    n_df = DataFrame(id_n=collect(1:num_n), n=unique(data.n))
     n_df.fe_n = α_n_vec 
     data = outerjoin(data, k_df, on=:k)
     data = outerjoin(data, n_df, on=:n)
-    # simplify
     term1 = -data.ell_kn .* (ϵ .* log.(data.delta) .+ data.fe_k .+ data.fe_n)
     term2 = data.delta .^ ϵ .* exp.(data.fe_k .+ data.fe_n)
     k_nbhd = outerjoin(k_df, D_k, on=:k, makeunique=true)
@@ -51,19 +48,17 @@ function ll(params; γ=gamma, data=data, D_k=k_neighboring, D_n=n_neighboring)
     penalty_k = sum((k_nbhd.fe_k .- k_nbhd.fe_k_origin) .^ 2)
     penalty_n = sum((n_nbhd.fe_n .- n_nbhd.fe_n_origin) .^ 2)
     log_likelihood_val = sum(skipmissing(term1) .+ skipmissing(term2)) + γ * (penalty_k + penalty_n)
-    println(ϵ, " ", log_likelihood_val)
+    # println(ϵ, " ", log_likelihood_val)
     return log_likelihood_val
 end
 
-function g!(G, params; data=data, γ=gamma, D_k=k_neighboring, D_n=n_neighboring)
-    num_k = length(unique(data.k))
-    num_n = length(unique(data.n))
+function g!(G, params; data=data, γ=gamma, num_k=num_k, num_n=num_n, D_k=k_neighboring, D_n=n_neighboring)
     ϵ = params[1]
     α_k_vec = params[2:num_k + 1]
     α_n_vec = params[num_k+2:end]
-    k_df = DataFrame(id_k=collect(1:num_k), k=sort(unique(data.k)))
+    k_df = DataFrame(id_k=collect(1:num_k), k=unique(data.k))
     k_df.fe_k = α_k_vec 
-    n_df = DataFrame(id_n=collect(1:num_n), n=sort(unique(data.n)))
+    n_df = DataFrame(id_n=collect(1:num_n), n=unique(data.n))
     n_df.fe_n = α_n_vec 
     data = outerjoin(data, k_df, on=:k)
     data = outerjoin(data, n_df, on=:n)
@@ -98,11 +93,13 @@ function g!(G, params; data=data, γ=gamma, D_k=k_neighboring, D_n=n_neighboring
 end
 
 
-lower = -15 * ones(num_k + num_n + 1); lower[1] = -8.0;
-upper = 15 * ones(num_k + num_n + 1); upper[1] = -7.0;
+lower = -15 * ones(num_k + num_n + 1); lower[1] = -8.5;
+upper = 15 * ones(num_k + num_n + 1); upper[1] = -7.5;
 @time results = optimize(ll, g!, lower, upper, params, Fminbox(GradientDescent()), 
-        Optim.Options(show_trace=true, x_abstol=1e-1, f_tol=1.0, g_tol=1.0, 
+        Optim.Options(show_trace=false, x_abstol=1e-1, f_tol=1.0, g_tol=1.0, 
             iterations=5, outer_iterations=5))
-CSV.write("../Output/fused_ridge_simulation_estimates_"*string(event)*"_"*string(gamma)*".csv", DataFrame(estimates=results.minimizer))
+estimates = results.minimizer
+CSV.write("../Output/fused_ridge_simulation_estimates_"*dgp*"_nbhd_"*string(event)*"_"*string(gamma)*".csv", 
+    DataFrame(estimates=estimates))
 
 
