@@ -2,7 +2,7 @@ using Base.Threads, CSV, DataFrames, JLD, Optim
 
 gamma = parse(Float64,ARGS[1])
 
-data = sort(DataFrame(load("../Data/nyc2010_lodes_wzero_wdelta.dta")), [:j, :i])
+@time data = sort(DataFrame(load("../Data/nyc2010_lodes_wzero_wdelta.dta")), [:j, :i])
 num_i = length(unique(data.i))
 num_j = length(unique(data.j))
 i_df = DataFrame(id_i=collect(1:num_i), i=sort(unique(data.i)))
@@ -18,7 +18,6 @@ neighboring_tracts.NEIGHBOR_TRACTID = string.(neighboring_tracts.NEIGHBOR_TRACTI
 i_neighboring = innerjoin(i_df, neighboring_tracts, on=:i)
 rename!(i_df, :i=>:NEIGHBOR_TRACTID)
 i_neighboring = innerjoin(i_neighboring, i_df, on=:NEIGHBOR_TRACTID, makeunique=true)
-# CSV.write("../Data/i_neighboring.csv", i_neighboring)
 
 neighboring_tracts = CSV.read("../Data/nlist_2010.csv", DataFrame)
 rename!(neighboring_tracts, :SOURCE_TRACTID=>:j)
@@ -27,53 +26,47 @@ neighboring_tracts.NEIGHBOR_TRACTID = string.(neighboring_tracts.NEIGHBOR_TRACTI
 j_neighboring = innerjoin(j_df, neighboring_tracts, on=:j)
 rename!(j_df, :j=>:NEIGHBOR_TRACTID)
 j_neighboring = innerjoin(j_neighboring, j_df, on=:NEIGHBOR_TRACTID, makeunique=true)
-# CSV.write("../Data/j_neighboring.csv", j_neighboring)
 
 ϵ = -7.98
 params_ppml = vcat(ϵ, fe_i_ppml, fe_j_ppml)
 
-function ll(params; γ=gamma, data=data, D_i=i_neighboring, D_j=j_neighboring)
-    num_i = length(unique(data.i))
-    num_j = length(unique(data.j))
-    ϵ = params[1]
-    α_i_vec = params[2:num_i + 1]
-    α_j_vec = params[num_i+2:end]
-    i_df = DataFrame(id_i=collect(1:num_i), i=sort(unique(data.i)))
-    i_df.fe_i = α_i_vec 
-    j_df = DataFrame(id_j=collect(1:num_j), j=sort(unique(data.j)))
-    j_df.fe_j = α_j_vec 
-    data = outerjoin(data, i_df, on=:i)
-    data = outerjoin(data, j_df, on=:j)
-    term1 = data.X_ij .* (ϵ .* data.log_delta .+ data.fe_i .+ data.fe_j)
-    term2 = -data.delta .^ ϵ .* exp.(data.fe_i .+ data.fe_j)
-    i_nbhd = outerjoin(i_df, D_i, on=:i, makeunique=true)
-    rename!(i_nbhd, :i=>:i_origin, :fe_i=>:fe_i_origin, :NEIGHBOR_TRACTID=>:i)
-    i_nbhd = outerjoin(i_df, i_nbhd, on=:i, makeunique=true, matchmissing=:equal)
-    i_nbhd = i_nbhd[completecases(i_nbhd), :]  # Drop row with missing values in columns
-    j_nbhd = outerjoin(j_df, D_j, on=:j, makeunique=true)
-    rename!(j_nbhd, :j=>:j_origin, :fe_j=>:fe_j_origin, :NEIGHBOR_TRACTID=>:j)
-    j_nbhd = outerjoin(j_df, j_nbhd, on=:j, makeunique=true, matchmissing=:equal)
-    j_nbhd = j_nbhd[completecases(j_nbhd), :]  # Drop row with missing values in columns
-    penalty_i = sum((i_nbhd.fe_i .- i_nbhd.fe_i_origin) .^ 2)
-    penalty_j = sum((j_nbhd.fe_j .- j_nbhd.fe_j_origin) .^ 2)
-    log_likelihood_val = sum(skipmissing(term1) .+ skipmissing(term2)) + γ * (penalty_i + penalty_j)
-    println(ϵ)
-    println(log_likelihood_val)
-    return -log_likelihood_val
+function ll(params; γ=gamma, data=data, num_i=num_i, num_j=num_j, D_i=i_neighboring, D_j=j_neighboring)
+   ϵ = params[1]
+   α_i_vec = params[2:num_i + 1]
+   α_j_vec = params[num_i+2:end]
+   i_df = DataFrame(id_i=collect(1:num_i), i=unique(data.i));
+   i_df.fe_i = α_i_vec; 
+   j_df = DataFrame(id_j=collect(1:num_j), j=unique(data.j));
+   j_df.fe_j = α_j_vec; 
+   data = outerjoin(data, i_df, on=:i);
+   data = outerjoin(data, j_df, on=:j);
+   term1 = -data.X_ij .* (ϵ .* data.log_delta .+ data.fe_i .+ data.fe_j);
+   term2 = data.delta .^ ϵ .* exp.(data.fe_i .+ data.fe_j);
+   i_nbhd = outerjoin(i_df, D_i, on=:i, makeunique=true);
+   rename!(i_nbhd, :i=>:i_origin, :fe_i=>:fe_i_origin, :NEIGHBOR_TRACTID=>:i)
+   i_nbhd = outerjoin(i_df, i_nbhd, on=:i, makeunique=true, matchmissing=:equal)
+   i_nbhd = i_nbhd[completecases(i_nbhd), :]  # Drop row with missing values in columns
+   j_nbhd = outerjoin(j_df, D_j, on=:j, makeunique=true)
+   rename!(j_nbhd, :j=>:j_origin, :fe_j=>:fe_j_origin, :NEIGHBOR_TRACTID=>:j)
+   j_nbhd = outerjoin(j_df, j_nbhd, on=:j, makeunique=true, matchmissing=:equal)
+   j_nbhd = j_nbhd[completecases(j_nbhd), :]  # Drop row with missing values in columns
+   penalty_i = sum((i_nbhd.fe_i .- i_nbhd.fe_i_origin) .^ 2)
+   penalty_j = sum((j_nbhd.fe_j .- j_nbhd.fe_j_origin) .^ 2)
+   log_likelihood_val = sum(skipmissing(term1) .+ skipmissing(term2)) + γ * (penalty_i + penalty_j)
+   # println(ϵ, " ", log_likelihood_val)
+    return log_likelihood_val
 end
 
-function g!(G, params; data=data, γ=gamma, D_i=i_neighboring, D_j=j_neighboring)
-    num_i = length(unique(data.i))
-    num_j = length(unique(data.j))
+function g!(G, params; data=data, γ=gamma, num_i=num_i, num_j=num_j, D_i=i_neighboring, D_j=j_neighboring)
     ϵ = params[1]
     α_i_vec = params[2:num_i + 1]
     α_j_vec = params[num_i+2:end]
-    i_df = DataFrame(id_i=collect(1:num_i), i=sort(unique(data.i)))
-    i_df.fe_i = α_i_vec 
-    j_df = DataFrame(id_j=collect(1:num_j), j=sort(unique(data.j)))
-    j_df.fe_j = α_j_vec 
-    data = outerjoin(data, i_df, on=:i)
-    data = outerjoin(data, j_df, on=:j)
+    i_df = DataFrame(id_i=collect(1:num_i), i=unique(data.i));
+    i_df.fe_i = α_i_vec;
+    j_df = DataFrame(id_j=collect(1:num_j), j=unique(data.j));
+    j_df.fe_j = α_j_vec;
+    data = outerjoin(data, i_df, on=:i);
+    data = outerjoin(data, j_df, on=:j);
     i_nbhd = outerjoin(i_df, D_i, on=:i, makeunique=true)
     rename!(i_nbhd, :i=>:i_origin, :fe_i=>:fe_i_origin, :NEIGHBOR_TRACTID=>:i)
     i_nbhd = outerjoin(i_df, i_nbhd, on=:i, makeunique=true, matchmissing=:equal)
@@ -84,35 +77,40 @@ function g!(G, params; data=data, γ=gamma, D_i=i_neighboring, D_j=j_neighboring
     j_nbhd = outerjoin(j_df, j_nbhd, on=:j, makeunique=true, matchmissing=:equal)
     j_nbhd.diff_term = 2 * γ * (j_nbhd.fe_j_origin .- j_nbhd.fe_j)
     j_nbhd = j_nbhd[completecases(j_nbhd), :]  # Drop row with missing values in columns
-    G[1] = -sum(skipmissing(data.log_delta .* (data.X_ij .+ exp.(data.fe_i .+ data.fe_j) .* data.delta .^ ϵ)))
+    G[1] = sum(skipmissing(data.log_delta .* (data.X_ij .+ exp.(data.fe_i .+ data.fe_j) .* data.delta .^ ϵ)))
     Threads.@threads for idx in 1:num_i
-    # simplify
-    println(idx)
-        i = unique(data.i)[idx];
-        data_i = data[data.id_i .== , :];
+        data_i = data[data.id_i .== idx, :];
         term1 = sum(skipmissing(data_i.X_ij + exp.(data_i.fe_i .+ data_i.fe_j) .* data_i.delta .^ ϵ))
-        i_nbhd_i = i_nbhd[i_nbhd.i_origin .== i, :]
+        i_nbhd_i = i_nbhd[i_nbhd.id_i_2 .== idx, :]
         term2 = sum(i_nbhd_i.diff_term)
-        G[1 + idx] = -(term1 + term2)
+        G[1 + idx] = term1 + term2
     end
     Threads.@threads for idx in 1:num_j
-    println(idx)
-        @time data_j = data[data.id_j .== idx, :];
-        @time term1 = sum(skipmissing(data_j.X_ij + exp.(data_j.fe_i .+ data_j.fe_j) .* data_j.delta .^ ϵ))
-        @time j_nbhd_j = j_nbhd[j_nbhd.j_origin .== j, :]
-        @time term2 = sum(j_nbhd_j.diff_term)
-        @time G[1 + num_i + idx] = -(term1 + term2)        
+        data_j = data[data.id_j .== idx, :];
+        term1 = sum(skipmissing(data_j.X_ij + exp.(data_j.fe_i .+ data_j.fe_j) .* data_j.delta .^ ϵ))
+        j_nbhd_j = j_nbhd[j_nbhd.id_j_2 .== idx, :]
+        term2 = sum(j_nbhd_j.diff_term)
+        G[1 + num_i + idx] = term1 + term2
     end
     return G
 end
 
+# Optimization
 lower = -10 * ones(num_i + num_j + 1); lower[1] = -9.0;
 upper = 10 * ones(num_i + num_j + 1); upper[1] = -6.0;
 @time results = optimize(ll, g!, lower, upper, params_ppml, Fminbox(GradientDescent()), 
-        Optim.Options(show_trace=true, x_abstol=1e-2, f_tol=1e-2, g_tol=1e-2, iterations=1))
-CSV.write("../Output/fused_ridge_estimates_"*string(gamma)*".csv", DataFrame(estimates=results.minimizer))
+        Optim.Options(show_trace=false, 
+            x_abstol=1e-2, x_reltol=1e-2, f_tol=1e-2, g_tol=1e-2, iterations=1, 
+            outer_x_abstol=1e-2, outer_f_abstol=1e-2, outer_g_abstol=1e-3, outer_iterations=1))
+estimates = results.minimizer
+CSV.write("../Output/fused_ridge_estimates_"*string(gamma)*".csv", DataFrame(estimates=estimates))
 
-
-# check rents and wages make senses
-
-
+# Compute and export wage and rent beliefs
+α = 0.24 
+ϵ = estimates[1]
+fe_i_ridge = estimates[2:num_i + 1]
+fe_j_ridge = estimates[num_i+2:end]
+rentbelief = coalesce.(exp.(-fe_i_ridge ./ (ϵ * α)), Inf)
+wagebelief = coalesce.(exp.(fe_j_ridge ./ ϵ), 0.0)
+CSV.write("../Output/fused_ridge_rentbelief_"*string(gamma)*".csv", DataFrame(wagebelief=rentbelief))
+CSV.write("../Output/fused_ridge_wagebelief_"*string(gamma)*".csv", DataFrame(wagebelief=wagebelief))
