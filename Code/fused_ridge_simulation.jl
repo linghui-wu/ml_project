@@ -4,7 +4,6 @@ dgp = ARGS[1]
 event = parse(Int64, ARGS[2])
 gamma = parse(Float64, ARGS[3])
 
-
 data = sort(DataFrame(load("../Data/simulated_data/"*dgp*"_nbhd_"*string(event)*".csv")), [:n, :k])
 num_k = length(unique(data.k))
 num_n = length(unique(data.n))
@@ -48,7 +47,7 @@ function ll(params; γ=gamma, data=data, num_k=num_k, num_n=num_n, D_k=k_neighbo
     penalty_k = sum((k_nbhd.fe_k .- k_nbhd.fe_k_origin) .^ 2)
     penalty_n = sum((n_nbhd.fe_n .- n_nbhd.fe_n_origin) .^ 2)
     log_likelihood_val = sum(skipmissing(term1) .+ skipmissing(term2)) + γ * (penalty_k + penalty_n)
-    # println(ϵ, " ", log_likelihood_val)
+    println(ϵ, " ", log_likelihood_val)
     return log_likelihood_val
 end
 
@@ -62,8 +61,6 @@ function g!(G, params; data=data, γ=gamma, num_k=num_k, num_n=num_n, D_k=k_neig
     n_df.fe_n = α_n_vec 
     data = outerjoin(data, k_df, on=:k)
     data = outerjoin(data, n_df, on=:n)
-    term1 = data.ell_kn .* (ϵ .* log.(data.delta) .+ data.fe_k .+ data.fe_n)
-    term2 = -data.delta .^ ϵ .* exp.(data.fe_k .+ data.fe_n)
     k_nbhd = outerjoin(k_df, D_k, on=:k, makeunique=true)
     rename!(k_nbhd, :k=>:k_origin, :fe_k=>:fe_k_origin, :neighbor=>:k)
     k_nbhd = outerjoin(k_df, k_nbhd, on=:k, makeunique=true, matchmissing=:equal)
