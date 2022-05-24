@@ -1,6 +1,6 @@
 # ECON31703 Topics in Econometrics Project
 
-### Spatially Smooth Fixed Effects with Fused PPML
+### Fixed Effects Estimation via Spatially Fused PPML
 
 Reigner Kane, Linghui Wu
 
