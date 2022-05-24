@@ -6,6 +6,8 @@ Reigner Kane, Linghui Wu
 
 ### Repository Structure
 
+* `Writeup.pdf`  
+
 * `Code/` contains source code of the project
 
 	* `*.R` constructs the adjacency matrics for residence and workplace census tracts, modifies the `pglasso` and `genlasso` packages, simulated the Monte Carlo DGP, estimates the fused lasso model and visualizes the estimates.
