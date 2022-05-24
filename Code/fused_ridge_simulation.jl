@@ -2,9 +2,8 @@ using Base.Threads, CSV, DataFrames, JLD, Optim
 
 dgp = ARGS[1]
 event = parse(Int64, ARGS[2])
-gamma = parse(Float64, ARGS[3])
 
-data = sort(DataFrame(load("../Data/simulated_data/"*dgp*"_nbhd_"*string(event)*".csv")), [:n, :k])
+data = sort(CSV.read("../Data/simulated_data/"*dgp*"_"*string(event)*".csv", DataFrame), [:n, :k])
 num_k = length(unique(data.k))
 num_n = length(unique(data.n))
 k_df = DataFrame(id_k=collect(1:num_k), k=sort(unique(data.k)))
@@ -47,7 +46,7 @@ function ll(params; γ=gamma, data=data, num_k=num_k, num_n=num_n, D_k=k_neighbo
     penalty_k = sum((k_nbhd.fe_k .- k_nbhd.fe_k_origin) .^ 2)
     penalty_n = sum((n_nbhd.fe_n .- n_nbhd.fe_n_origin) .^ 2)
     log_likelihood_val = sum(skipmissing(term1) .+ skipmissing(term2)) + γ * (penalty_k + penalty_n)
-    println(ϵ, " ", log_likelihood_val)
+    # println(ϵ, " ", log_likelihood_val)
     return log_likelihood_val
 end
 
@@ -64,7 +63,7 @@ function g!(G, params; data=data, γ=gamma, num_k=num_k, num_n=num_n, D_k=k_neig
     k_nbhd = outerjoin(k_df, D_k, on=:k, makeunique=true)
     rename!(k_nbhd, :k=>:k_origin, :fe_k=>:fe_k_origin, :neighbor=>:k)
     k_nbhd = outerjoin(k_df, k_nbhd, on=:k, makeunique=true, matchmissing=:equal)
-    k_nbhd.diff_term = 2 * γ * (k_nbhd.fe_k_origin .- k_nbhd.fe_k)
+    k_nbhd.diff_term = 2 * 2 * γ * (k_nbhd.fe_k_origin .- k_nbhd.fe_k)
     k_nbhd = k_nbhd[completecases(k_nbhd), :]  # Drop row with missing values in columns
     n_nbhd = outerjoin(n_df, D_n, on=:n, makeunique=true)
     rename!(n_nbhd, :n=>:n_origin, :fe_n=>:fe_n_origin, :neighbor=>:n)
@@ -90,13 +89,28 @@ function g!(G, params; data=data, γ=gamma, num_k=num_k, num_n=num_n, D_k=k_neig
 end
 
 
-lower = -15 * ones(num_k + num_n + 1); lower[1] = -8.5;
-upper = 15 * ones(num_k + num_n + 1); upper[1] = -7.5;
-@time results = optimize(ll, g!, lower, upper, params, Fminbox(GradientDescent()), 
-        Optim.Options(show_trace=false, x_abstol=1e-1, f_tol=1.0, g_tol=1.0, 
-            iterations=5, outer_iterations=5))
-estimates = results.minimizer
-CSV.write("../Output/fused_ridge_simulation_estimates_"*dgp*"_nbhd_"*string(event)*"_"*string(gamma)*".csv", 
-    DataFrame(estimates=estimates))
+function calculate_MSE(ridge_df::DataFrame; data=data, num_k=num_k, num_n=num_n, k_df=k_df, n_df=n_df)
+    ϵ_ridge = ridge_df.estimates[1]
+    k_df.fe_k_ridge = ridge_df.estimates[2:num_k + 1]
+    n_df.fe_n_ridge = ridge_df.estimates[num_n+2:end]
+    data = outerjoin(data, k_df, on=:k);
+    data = outerjoin(data, n_df, on=:n);
+    ell_kn_pred = exp.(-ϵ_ridge .* log.(data.delta) .+ data.fe_n_ridge .+ data.fe_k_ridge)
+    return sum(skipmissing((data.ell_kn .- ell_kn_pred) .^ 2)) / length(data.ell_kn)
+end
 
+gamma_vec = collect(0:50:1500)
+MSE_vec = zeros(length(gamma_vec))
+for idx in collect(1:length(gamma_vec))
+    gamma = gamma_vec[idx]
 
+    lower = -15 * ones(num_k + num_n + 1); lower[1] = -8.5;
+    upper = 15 * ones(num_k + num_n + 1); upper[1] = -7.5;
+    @time results = optimize(ll, g!, lower, upper, params, Fminbox(GradientDescent()), 
+            Optim.Options(show_trace=true, x_abstol=1e-1, f_tol=1.0, g_tol=1.0, 
+                iterations=2, outer_iterations=2))
+    estimates_gamma = results.minimizer
+    CSV.write("../Output_simulation/fused_ridge_simulation_estimates_"*dgp*"_nbhd_"*string(event)*"_"*string(gamma)*".csv", 
+        DataFrame(estimates=estimates_gamma))
+    MSE_vec[idx] = calculate_MSE(DataFrame(estimates=estimates_gamma))
+end

@@ -25,20 +25,20 @@ file_vec = Vector{String}()
 γ_vec = Vector{Float64}()
 MSE_vec = Vector{Float64}()
 ϵ_ridge_vec = Vector{Float64}()
-Threads.@threads for file in readdir("../Output/")
+for file in readdir("../Output/")
     if occursin("fused_ridge_estimates", file)
         push!(file_vec, file)
         push!(γ_vec, parse(Float64,  split(split(file, "_")[end], ".csv")[1]))
-        println(γ_vec[end])
-
         df = CSV.read("../Output/"*file, DataFrame)
         ϵ_ridge = df.estimates[1]; push!(ϵ_ridge_vec, ϵ_ridge);
-        push!(MSE_vec, calculate_MSE(df))
+        MSE = calculate_MSE(df)
+        @time push!(MSE_vec, MSE)
+        println(γ_vec[end], " ", ϵ_ridge, " ", MSE)
     end
 end
 df_tuning = sort(DataFrame(gamma=γ_vec, MSE=MSE_vec, epsilon_est=ϵ_ridge_vec), [:gamma])
 
-min_idx = findmin(df_tuning.MSE)[2]
+min_idx = findmin(df_tuning.MSE[2:end])[2]
 gamma_optimal = df_tuning.gamma[min_idx]
 file_optimal = "../Output/fused_ridge_estimates_"*string(gamma_optimal)*".csv"
 df_optimal = CSV.read(file_optimal, DataFrame)
